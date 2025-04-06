@@ -1,5 +1,6 @@
 slack_bolt
+dropbox
 pandas
 openpyxl
-dropbox
 python-dotenv
+openai
