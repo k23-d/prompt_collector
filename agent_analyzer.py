@@ -1,5 +1,3 @@
-#AI Agent
-
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -22,7 +20,8 @@ def analyze_prompt(prompt_text):
                     "You are a business strategist and prompt engineer. "
                     "Classify the prompt into one of the following categories: "
                     + ", ".join(CATEGORIES) + ". "
-                    "Then suggest a clearer or more effective version if possible."
+                    "Then suggest a clearer or more effective version of the prompt. "
+                    "Respond in this format only:\nCategory: <Category>\nImproved Prompt: <Improved version>"
                 )},
                 {"role": "user", "content": f"Prompt: {prompt_text}"}
             ],
@@ -30,15 +29,33 @@ def analyze_prompt(prompt_text):
         )
 
         output = response.choices[0].message.content.strip()
-        category = next((cat for cat in CATEGORIES if cat.lower() in output.lower()), "General")
+        print("🔍 GPT Response:", output)
 
+        # Extract category
+        category_line = next((line for line in output.splitlines() if line.lower().startswith("category:")), None)
+        category = "General"
+        if category_line:
+            cat_candidate = category_line.split(":", 1)[1].strip()
+            if cat_candidate in CATEGORIES:
+                category = cat_candidate
+
+        # Extract improved prompt
+        improved_prompt_line = next((line for line in output.splitlines() if line.lower().startswith("improved prompt:")), None)
         improved_prompt = prompt_text
-        if "Improved Prompt:" in output:
-            improved_prompt = output.split("Improved Prompt:")[1].strip()
-        elif "Improved version:" in output:
-            improved_prompt = output.split("Improved version:")[1].strip()
+        improved = False
 
-        return {"category": category, "improved_prompt": improved_prompt}
+        if improved_prompt_line:
+            improved_candidate = improved_prompt_line.split(":", 1)[1].strip()
+            if improved_candidate and improved_candidate.lower() != prompt_text.lower():
+                improved_prompt = improved_candidate
+                improved = True
+
+        return {
+            "category": category,
+            "improved_prompt": improved_prompt,
+            "improved": improved
+        }
+
     except Exception as e:
         print("❌ GPT Error:", e)
-        return {"category": "General", "improved_prompt": prompt_text}
+        return {"category": "General", "improved_prompt": prompt_text, "improved": False}
