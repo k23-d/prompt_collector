@@ -29,7 +29,8 @@ def handle_prompt(message_text, user, timestamp):
         category = analysis["category"]
     else:
         improved_prompt = raw_prompt
-        analysis = analyze_prompt(raw_prompt)
+        category = "General"
+        analysis = analyze_prompt(raw_prompt)  # still use it to classify
         category = analysis["category"]
 
     sheet = category
@@ -68,25 +69,29 @@ def handle_prompt(message_text, user, timestamp):
         existing_sheets = []
 
     output = BytesIO()
+    df_existing = pd.DataFrame(columns=COLUMNS)
+
     if wb:
+        if sheet in wb.sheetnames:
+            df_existing = pd.read_excel(input_excel, sheet_name=sheet)
+
+        if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
+            return {"status": "similar", "category": category, "prompt": raw_prompt}
+
+        df_updated = pd.concat([df_existing, pd.DataFrame([new_entry])], ignore_index=True)
+
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             writer.book = wb
             writer.sheets = {ws.title: ws for ws in wb.worksheets}
-
-            if sheet in wb.sheetnames:
-                df_existing = pd.read_excel(input_excel, sheet_name=sheet)
-            else:
-                df_existing = pd.DataFrame(columns=COLUMNS)
-
-            if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
-                return {"status": "similar", "category": category, "prompt": raw_prompt}
-
-            df_updated = pd.concat([df_existing, pd.DataFrame([new_entry])], ignore_index=True)
             df_updated.to_excel(writer, sheet_name=sheet, index=False)
+
     else:
-        df = pd.DataFrame([new_entry])
+        if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
+            return {"status": "similar", "category": category, "prompt": raw_prompt}
+
+        df_new = pd.DataFrame([new_entry])
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name=sheet, index=False)
+            df_new.to_excel(writer, sheet_name=sheet, index=False)
 
     output.seek(0)
     upload_bytes_to_dropbox(output, DROPBOX_PATH)
