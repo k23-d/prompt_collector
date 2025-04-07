@@ -1,1 +1,1 @@
-worker: python slack_listener.py
+worker: python test_dropbox_upload.py
