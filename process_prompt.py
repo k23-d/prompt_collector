@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 from agent_analyzer import analyze_prompt
 from dropbox_upload import upload_bytes_to_dropbox
 from difflib import SequenceMatcher
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
+from dropbox import Dropbox
+import requests
 
 load_dotenv()
 
@@ -42,44 +44,54 @@ def handle_prompt(message_text, user, timestamp):
         'Tags': ''
     }
 
-    from dropbox import Dropbox
-    import requests
+    # Step 1: Get Dropbox access token
+    access_token = requests.post(
+        "https://api.dropboxapi.com/oauth2/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": os.getenv("DROPBOX_REFRESH_TOKEN"),
+            "client_id": os.getenv("DROPBOX_APP_KEY"),
+            "client_secret": os.getenv("DROPBOX_APP_SECRET"),
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    ).json()["access_token"]
+
+    dbx = Dropbox(oauth2_access_token=access_token)
 
     try:
-        access_token = requests.post(
-            "https://api.dropboxapi.com/oauth2/token",
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": os.getenv("DROPBOX_REFRESH_TOKEN"),
-                "client_id": os.getenv("DROPBOX_APP_KEY"),
-                "client_secret": os.getenv("DROPBOX_APP_SECRET"),
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"}
-        ).json()["access_token"]
-
-        dbx = Dropbox(oauth2_access_token=access_token)
+        # Step 2: Try loading the existing Excel file
         metadata, res = dbx.files_download(DROPBOX_PATH)
-        excel_file = BytesIO(res.content)
-        writer = pd.ExcelWriter(excel_file, engine='openpyxl', mode='a', if_sheet_exists='overlay')
-        existing = pd.read_excel(excel_file, sheet_name=None)
+        input_excel = BytesIO(res.content)
+        wb = load_workbook(input_excel)
     except Exception as e:
-        print("📂 Starting fresh Excel file due to error:", e)
-        excel_file = BytesIO()
-        writer = pd.ExcelWriter(excel_file, engine='openpyxl')
-        existing = {}
+        print("📂 No existing file or unreadable. Creating new workbook.")
+        wb = Workbook()
+        del wb[wb.active.title]  # Remove default sheet
 
-    # Step 3: Check for similarity
-    df = existing.get(sheet, pd.DataFrame(columns=COLUMNS))
-    if is_similar(raw_prompt, df['Prompt'].tolist()):
+    # Step 3: Read existing sheet or create new
+    if sheet in wb.sheetnames:
+        temp = BytesIO()
+        wb.save(temp)
+        temp.seek(0)
+        df_existing = pd.read_excel(temp, sheet_name=sheet)
+    else:
+        df_existing = pd.DataFrame(columns=COLUMNS)
+
+    # Step 4: Check for similarity
+    if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
         return {"status": "similar", "category": category, "prompt": raw_prompt}
 
-    # Step 4: Append to sheet
-    df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-    df.to_excel(writer, sheet_name=sheet, index=False)
-    writer.close()
+    # Step 5: Append new entry and write sheet cleanly
+    df_updated = pd.concat([df_existing, pd.DataFrame([new_entry])], ignore_index=True)
 
-    excel_file.seek(0)
-    upload_bytes_to_dropbox(excel_file, DROPBOX_PATH)
+    output_excel = BytesIO()
+    with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
+        writer.book = wb
+        writer.sheets = {ws.title: ws for ws in wb.worksheets}
+        df_updated.to_excel(writer, sheet_name=sheet, index=False)
+
+    output_excel.seek(0)
+    upload_bytes_to_dropbox(output_excel, DROPBOX_PATH)
 
     return {
         "status": "success",
