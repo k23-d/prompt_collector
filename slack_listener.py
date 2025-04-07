@@ -21,26 +21,39 @@ def handle_message_events(body, say, client):
             print("📥 Prompt detected:", text)
             result = handle_prompt(text, user, ts)
 
-            # Generate reply based on result
+            # 📣 Generate Slack reply based on result
             if result["status"] == "success":
                 if result["improved"]:
                     reply = (
-                        f"✅ *Prompt saved under* `{result['category']}`!\n\n"
+                        f"✅ *Prompt saved under* `{result['category']}` with improvements!\n\n"
                         f"*Improved Prompt:* {result['improved_prompt']}"
                     )
                 else:
-                    reply = f"✅ *Prompt saved under* `{result['category']}` as-is!"
+                    reply = (
+                        f"✅ *Prompt saved under* `{result['category']}` as-is.\n"
+                        f"_No improvements were suggested by the AI._"
+                    )
             elif result["status"] == "similar":
-                reply = f"⚠️ A similar prompt already exists in `{result['category']}`. It was not saved."
+                reply = (
+                    f"⚠️ A similar prompt already exists in `{result['category']}`.\n"
+                    f"_This one was not saved to avoid duplication._"
+                )
             else:
-                reply = "❌ Error occurred while processing your prompt."
+                reply = "❌ Something went wrong while processing your prompt. Please try again."
 
+            # ✅ Reply to the original message in thread
             client.chat_postMessage(channel=channel, thread_ts=ts, text=reply)
+
         else:
             print("ℹ️ Message ignored (no #prompt tag).")
 
     except Exception as e:
         print("❌ Slack bot error:", e)
+        client.chat_postMessage(
+            channel=channel,
+            thread_ts=ts,
+            text="🚨 Something went wrong while processing your prompt. Please contact the admin."
+        )
 
 if __name__ == "__main__":
     print("🚀 Starting Prompt Collector Slack Bot...")
