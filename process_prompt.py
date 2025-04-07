@@ -80,6 +80,9 @@ def handle_prompt(message_text, user, timestamp):
     df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
     df.to_excel(writer, sheet_name=sheet, index=False)
     writer.close()
+
+     # 🔧 Fix pointer before upload
+    excel_file.seek(0)
     upload_bytes_to_dropbox(excel_file, DROPBOX_PATH)
 
     return {
