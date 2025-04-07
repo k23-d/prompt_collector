@@ -83,12 +83,10 @@ def handle_prompt(message_text, user, timestamp):
 
             df_updated = pd.concat([df_existing, pd.DataFrame([new_entry])], ignore_index=True)
             df_updated.to_excel(writer, sheet_name=sheet, index=False)
-            writer.save()
     else:
         df = pd.DataFrame([new_entry])
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name=sheet, index=False)
-            writer.save()
 
     output.seek(0)
     upload_bytes_to_dropbox(output, DROPBOX_PATH)
