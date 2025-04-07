@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from agent_analyzer import analyze_prompt
 from dropbox_upload import upload_bytes_to_dropbox
 from difflib import SequenceMatcher
+from openpyxl import load_workbook
 
 load_dotenv()
 
@@ -22,23 +23,29 @@ def handle_prompt(message_text, user, timestamp):
     improve = "[improve]" in message_text.lower()
     raw_prompt = message_text.replace("#prompt", "").replace("[improve]", "").replace("[raw]", "").strip()
 
-    # Step 1: Classify and improve (if needed)
     if improve:
         analysis = analyze_prompt(raw_prompt)
         improved_prompt = analysis["improved_prompt"]
         category = analysis["category"]
     else:
         improved_prompt = raw_prompt
-        category = "General"  # fallback if no GPT categorization
         analysis = analyze_prompt(raw_prompt)
         category = analysis["category"]
 
-    # Step 2: Try to load existing file from Dropbox
-    try:
-        from dropbox import Dropbox
-        import requests
+    sheet = category
+    ts = datetime.fromtimestamp(float(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
+    new_entry = {
+        'Prompt': raw_prompt,
+        'Improved Prompt': improved_prompt,
+        'Submitted By': user,
+        'Date': ts,
+        'Tags': ''
+    }
 
-        # Fetch a fresh access token manually
+    from dropbox import Dropbox
+    import requests
+
+    try:
         access_token = requests.post(
             "https://api.dropboxapi.com/oauth2/token",
             data={
@@ -52,38 +59,39 @@ def handle_prompt(message_text, user, timestamp):
 
         dbx = Dropbox(oauth2_access_token=access_token)
         metadata, res = dbx.files_download(DROPBOX_PATH)
-        excel_file = BytesIO(res.content)
-        writer = pd.ExcelWriter(excel_file, engine='openpyxl', mode='a', if_sheet_exists='overlay')
-        existing = pd.read_excel(excel_file, sheet_name=None)
+        input_excel = BytesIO(res.content)
+        wb = load_workbook(input_excel)
+        existing_sheets = wb.sheetnames
     except Exception as e:
-        print("📂 Starting fresh Excel file due to error:", e)
-        excel_file = BytesIO()
-        writer = pd.ExcelWriter(excel_file, engine='openpyxl')
-        existing = {}
+        print("📂 No existing file, creating new workbook.", e)
+        wb = None
+        existing_sheets = []
 
-    # Step 3: Check for similarity
-    sheet = category
-    df = existing.get(sheet, pd.DataFrame(columns=COLUMNS))
-    if is_similar(raw_prompt, df['Prompt'].tolist()):
-        return {"status": "similar", "category": category, "prompt": raw_prompt}
+    output = BytesIO()
+    if wb:
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            writer.book = wb
+            writer.sheets = {ws.title: ws for ws in wb.worksheets}
 
-    # Step 4: Append to sheet
-    ts = datetime.fromtimestamp(float(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
-    new_entry = {
-        'Prompt': raw_prompt,
-        'Improved Prompt': improved_prompt,
-        'Submitted By': user,
-        'Date': ts,
-        'Tags': ''
-    }
+            if sheet in wb.sheetnames:
+                df_existing = pd.read_excel(input_excel, sheet_name=sheet)
+            else:
+                df_existing = pd.DataFrame(columns=COLUMNS)
 
-    df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-    df.to_excel(writer, sheet_name=sheet, index=False)
-    writer.close()
+            if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
+                return {"status": "similar", "category": category, "prompt": raw_prompt}
 
-     # 🔧 Fix pointer before upload
-    excel_file.seek(0)
-    upload_bytes_to_dropbox(excel_file, DROPBOX_PATH)
+            df_updated = pd.concat([df_existing, pd.DataFrame([new_entry])], ignore_index=True)
+            df_updated.to_excel(writer, sheet_name=sheet, index=False)
+            writer.save()
+    else:
+        df = pd.DataFrame([new_entry])
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name=sheet, index=False)
+            writer.save()
+
+    output.seek(0)
+    upload_bytes_to_dropbox(output, DROPBOX_PATH)
 
     return {
         "status": "success",
