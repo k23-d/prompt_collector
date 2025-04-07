@@ -1,76 +1,48 @@
-from datetime import datetime
-from io import BytesIO
-import pandas as pd
-import dropbox
-import os
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
 from dotenv import load_dotenv
-from agent_analyzer import analyze_prompt
-from dropbox_upload import upload_bytes_to_dropbox
-from difflib import SequenceMatcher
+import os
+from process_prompt import handle_prompt
 
 load_dotenv()
 
-DROPBOX_PATH = "/PromptCollector/Prompt_Library_Categorized.xlsx"
-COLUMNS = ['Prompt', 'Improved Prompt', 'Submitted By', 'Date', 'Tags']
+app = App(token=os.getenv("SLACK_BOT_TOKEN"))
 
-def is_similar(prompt, existing_prompts, threshold=0.7):
-    for existing in existing_prompts:
-        if SequenceMatcher(None, prompt.lower(), existing.lower()).ratio() >= threshold:
-            return True
-    return False
-
-def handle_prompt(message_text, user, timestamp):
-    improve = "[improve]" in message_text.lower()
-    raw_prompt = message_text.replace("#prompt", "").replace("[improve]", "").replace("[raw]", "").strip()
-
-    # Step 1: Classify and improve (if needed)
-    if improve:
-        analysis = analyze_prompt(raw_prompt)
-        improved_prompt = analysis["improved_prompt"]
-        category = analysis["category"]
-    else:
-        improved_prompt = raw_prompt
-        category = "General"  # fallback if no GPT categorization
-        analysis = analyze_prompt(raw_prompt)  # still classify for sheet routing
-        category = analysis["category"]
-
-    # Step 2: Download current file from Dropbox
+@app.event("message")
+def handle_message_events(body, say, client):
     try:
-        dbx = dropbox.Dropbox(os.getenv("DROPBOX_ACCESS_TOKEN"))
-        metadata, res = dbx.files_download(DROPBOX_PATH)
-        excel_file = BytesIO(res.content)
-        writer = pd.ExcelWriter(excel_file, engine='openpyxl', mode='a', if_sheet_exists='overlay')
-        existing = pd.read_excel(excel_file, sheet_name=None)
-    except dropbox.exceptions.ApiError:
-        excel_file = BytesIO()
-        writer = pd.ExcelWriter(excel_file, engine='openpyxl')
-        existing = {}
+        event = body.get("event", {})
+        text = event.get("text", "")
+        user = event.get("user", "")
+        ts = event.get("ts", "")
+        channel = event.get("channel", "")
 
-    # Step 3: Check for similarity
-    sheet = category
-    df = existing.get(sheet, pd.DataFrame(columns=COLUMNS))
-    if is_similar(raw_prompt, df['Prompt'].tolist()):
-        return {"status": "similar", "category": category, "prompt": raw_prompt}
+        if "#prompt" in text.lower():
+            print("📥 Prompt detected:", text)
+            result = handle_prompt(text, user, ts)
 
-    # Step 4: Append to the correct sheet
-    ts = datetime.fromtimestamp(float(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
-    new_entry = {
-        'Prompt': raw_prompt,
-        'Improved Prompt': improved_prompt,
-        'Submitted By': user,
-        'Date': ts,
-        'Tags': ''
-    }
+            # Generate reply based on result
+            if result["status"] == "success":
+                if result["improved"]:
+                    reply = (
+                        f"✅ *Prompt saved under* `{result['category']}`!\n\n"
+                        f"*Improved Prompt:* {result['improved_prompt']}"
+                    )
+                else:
+                    reply = f"✅ *Prompt saved under* `{result['category']}` as-is!"
+            elif result["status"] == "similar":
+                reply = f"⚠️ A similar prompt already exists in `{result['category']}`. It was not saved."
+            else:
+                reply = "❌ Error occurred while processing your prompt."
 
-    df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-    df.to_excel(writer, sheet_name=sheet, index=False)
-    writer.close()
-    upload_bytes_to_dropbox(excel_file, DROPBOX_PATH)
+            client.chat_postMessage(channel=channel, thread_ts=ts, text=reply)
+        else:
+            print("ℹ️ Message ignored (no #prompt tag).")
 
-    return {
-        "status": "success",
-        "category": category,
-        "prompt": raw_prompt,
-        "improved_prompt": improved_prompt,
-        "improved": improve
-    }
+    except Exception as e:
+        print("❌ Slack bot error:", e)
+
+if __name__ == "__main__":
+    print("🚀 Starting Prompt Collector Slack Bot...")
+    handler = SocketModeHandler(app, os.getenv("SLACK_APP_TOKEN"))
+    handler.start()
