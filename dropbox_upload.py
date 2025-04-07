@@ -2,6 +2,11 @@ import os
 import requests
 from dropbox import Dropbox
 
+print("🧪 DEBUG: Dumping environment keys from Railway...")
+for k, v in os.environ.items():
+    if "DROPBOX" in k:
+        print(f"{k} = {v[:6]}... (len: {len(v)})")
+
 def get_fresh_access_token():
     DROPBOX_APP_KEY = os.getenv("DROPBOX_APP_KEY")
     DROPBOX_APP_SECRET = os.getenv("DROPBOX_APP_SECRET")
