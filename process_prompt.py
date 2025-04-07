@@ -59,37 +59,27 @@ def handle_prompt(message_text, user, timestamp):
 
         dbx = Dropbox(oauth2_access_token=access_token)
         metadata, res = dbx.files_download(DROPBOX_PATH)
-        input_excel = BytesIO(res.content)
-        wb = load_workbook(input_excel)
+        excel_file = BytesIO(res.content)
+        writer = pd.ExcelWriter(excel_file, engine='openpyxl', mode='a', if_sheet_exists='overlay')
+        existing = pd.read_excel(excel_file, sheet_name=None)
     except Exception as e:
-        print("📂 No existing file, creating new workbook.", e)
-        wb = None
+        print("📂 Starting fresh Excel file due to error:", e)
+        excel_file = BytesIO()
+        writer = pd.ExcelWriter(excel_file, engine='openpyxl')
+        existing = {}
 
-    output = BytesIO()
-    df_existing = pd.DataFrame(columns=COLUMNS)
+    # Step 3: Check for similarity
+    df = existing.get(sheet, pd.DataFrame(columns=COLUMNS))
+    if is_similar(raw_prompt, df['Prompt'].tolist()):
+        return {"status": "similar", "category": category, "prompt": raw_prompt}
 
-    if wb:
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            writer.book = wb
-            writer.sheets = {ws.title: ws for ws in wb.worksheets}
+    # Step 4: Append to sheet
+    df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+    df.to_excel(writer, sheet_name=sheet, index=False)
+    writer.close()
 
-            try:
-                df_existing = pd.read_excel(input_excel, sheet_name=sheet)
-            except:
-                df_existing = pd.DataFrame(columns=COLUMNS)
-
-            if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
-                return {"status": "similar", "category": category, "prompt": raw_prompt}
-
-            df_updated = pd.concat([df_existing, pd.DataFrame([new_entry])], ignore_index=True)
-            df_updated.to_excel(writer, sheet_name=sheet, index=False)
-    else:
-        df = pd.DataFrame([new_entry])
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name=sheet, index=False)
-
-    output.seek(0)
-    upload_bytes_to_dropbox(output, DROPBOX_PATH)
+    excel_file.seek(0)
+    upload_bytes_to_dropbox(excel_file, DROPBOX_PATH)
 
     return {
         "status": "success",
