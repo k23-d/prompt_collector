@@ -11,6 +11,10 @@ DROPBOX_APP_SECRET = os.getenv("DROPBOX_APP_SECRET")
 DROPBOX_REFRESH_TOKEN = os.getenv("DROPBOX_REFRESH_TOKEN")
 
 def get_fresh_access_token():
+    print("🔍 Checking Dropbox credentials:")
+    print("APP_KEY starts with:", DROPBOX_APP_KEY[:4])
+    print("APP_SECRET starts with:", DROPBOX_APP_SECRET[:4])
+    print("REFRESH_TOKEN starts with:", DROPBOX_REFRESH_TOKEN[:8])
     response = requests.post(
         "https://api.dropboxapi.com/oauth2/token",
         data={
