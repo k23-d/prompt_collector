@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from agent_analyzer import analyze_prompt
 from dropbox_upload import upload_bytes_to_dropbox
 from difflib import SequenceMatcher
-from openpyxl import load_workbook, Workbook
+from openpyxl import Workbook, load_workbook
 from dropbox import Dropbox
 import requests
 
@@ -44,7 +44,6 @@ def handle_prompt(message_text, user, timestamp):
         'Tags': ''
     }
 
-    # Step 1: Get Dropbox access token
     access_token = requests.post(
         "https://api.dropboxapi.com/oauth2/token",
         data={
@@ -58,36 +57,27 @@ def handle_prompt(message_text, user, timestamp):
 
     dbx = Dropbox(oauth2_access_token=access_token)
 
+    existing_sheets = {}
     try:
-        # Step 2: Try loading the existing Excel file
         metadata, res = dbx.files_download(DROPBOX_PATH)
         input_excel = BytesIO(res.content)
-        wb = load_workbook(input_excel)
+        existing_sheets = pd.read_excel(input_excel, sheet_name=None)
     except Exception as e:
-        print("📂 No existing file or unreadable. Creating new workbook.")
-        wb = Workbook()
-        del wb[wb.active.title]  # Remove default sheet
+        print("📂 No existing file or unreadable. Creating new workbook.", e)
 
-    # Step 3: Read existing sheet or create new
-    if sheet in wb.sheetnames:
-        temp = BytesIO()
-        wb.save(temp)
-        temp.seek(0)
-        df_existing = pd.read_excel(temp, sheet_name=sheet)
-    else:
-        df_existing = pd.DataFrame(columns=COLUMNS)
+    df_existing = existing_sheets.get(sheet, pd.DataFrame(columns=COLUMNS))
 
-    # Step 4: Check for similarity
     if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
         return {"status": "similar", "category": category, "prompt": raw_prompt}
 
-    # Step 5: Append new entry and write sheet cleanly
     df_updated = pd.concat([df_existing, pd.DataFrame([new_entry])], ignore_index=True)
 
+    # Create a new in-memory Excel file and write all sheets (including updated one)
     output_excel = BytesIO()
     with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
-        writer.book = wb
-        writer.sheets = {ws.title: ws for ws in wb.worksheets}
+        for sheet_name, dataframe in existing_sheets.items():
+            if sheet_name != sheet:
+                dataframe.to_excel(writer, sheet_name=sheet_name, index=False)
         df_updated.to_excel(writer, sheet_name=sheet, index=False)
 
     output_excel.seek(0)
