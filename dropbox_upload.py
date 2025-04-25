@@ -48,3 +48,9 @@ def upload_bytes_to_dropbox(file_like_object, dropbox_path):
         print(f"✅ Uploaded to Dropbox: {dropbox_path}")
     except Exception as e:
         print("❌ Dropbox upload failed:", e)
+
+def download_excel_from_dropbox(dropbox_path):
+    access_token = get_fresh_access_token()
+    dbx = Dropbox(oauth2_access_token=access_token)
+    metadata, res = dbx.files_download(dropbox_path)
+    return BytesIO(res.content)
