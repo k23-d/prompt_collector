@@ -13,9 +13,7 @@ import requests
 load_dotenv()
 
 DROPBOX_PATH = "/PromptCollector/Prompt_Library_Categorized.xlsx"
-
-DEFAULT_COLUMNS = ['Prompt', 'Improved Prompt', 'Submitted By', 'Date', 'Tags']
-ACTIONABLE_COLUMNS = ['Prompt', 'Improved Prompt', 'Submitted By', 'Date', 'Business Function', 'Status', 'Tags']
+COLUMNS = ['Prompt', 'Improved Prompt', 'Submitted By', 'Date', 'Tags']
 
 def is_similar(prompt, existing_prompts, threshold=0.7):
     for existing in existing_prompts:
@@ -25,29 +23,19 @@ def is_similar(prompt, existing_prompts, threshold=0.7):
 
 def handle_prompt(message_text, user, timestamp):
     improve = "[improve]" in message_text.lower()
-    is_actionable = "[action]" in message_text.lower()
+    raw_prompt = message_text.replace("#prompt", "").replace("[improve]", "").replace("[raw]", "").strip()
 
-    raw_prompt = (
-        message_text
-        .replace("#prompt", "")
-        .replace("[improve]", "")
-        .replace("[action]", "")
-        .replace("[raw]", "")
-        .strip()
-    )
+    if improve:
+        analysis = analyze_prompt(raw_prompt)
+        improved_prompt = analysis["improved_prompt"]
+        category = analysis["category"]
+    else:
+        improved_prompt = raw_prompt
+        analysis = analyze_prompt(raw_prompt)
+        category = analysis["category"]
 
-    # GPT analysis runs regardless, to classify business function
-    analysis = analyze_prompt(raw_prompt)
-    improved_prompt = analysis["improved_prompt"] if improve else raw_prompt
-    category = analysis["category"]
-
-    # Select the correct sheet and columns
-    sheet = "Actionable_Prompts" if is_actionable else category
-    columns = ACTIONABLE_COLUMNS if is_actionable else DEFAULT_COLUMNS
-
+    sheet = category
     ts = datetime.fromtimestamp(float(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
-
-    # Prepare the new entry depending on whether it’s actionable
     new_entry = {
         'Prompt': raw_prompt,
         'Improved Prompt': improved_prompt,
@@ -55,11 +43,7 @@ def handle_prompt(message_text, user, timestamp):
         'Date': ts,
         'Tags': ''
     }
-    if is_actionable:
-        new_entry['Business Function'] = category
-        new_entry['Status'] = 'Pending'
 
-    # Refresh Dropbox access token
     access_token = requests.post(
         "https://api.dropboxapi.com/oauth2/token",
         data={
@@ -81,7 +65,7 @@ def handle_prompt(message_text, user, timestamp):
     except Exception as e:
         print("📂 No existing file or unreadable. Creating new workbook.", e)
 
-    df_existing = existing_sheets.get(sheet, pd.DataFrame(columns=columns))
+    df_existing = existing_sheets.get(sheet, pd.DataFrame(columns=COLUMNS))
 
     if is_similar(raw_prompt, df_existing['Prompt'].tolist()):
         return {"status": "similar", "category": category, "prompt": raw_prompt}
@@ -104,6 +88,5 @@ def handle_prompt(message_text, user, timestamp):
         "category": category,
         "prompt": raw_prompt,
         "improved_prompt": improved_prompt,
-        "improved": improve,
-        "actionable": is_actionable
+        "improved": improve
     }
