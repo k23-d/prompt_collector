@@ -16,6 +16,7 @@ def handle_message_events(body, say, client):
         user = event.get("user", "")
         ts = event.get("ts", "")
         channel = event.get("channel", "")
+        print("📥 message detected:", text)
 
         if "#prompt" in text.lower():
             print("📥 Prompt detected:", text)
